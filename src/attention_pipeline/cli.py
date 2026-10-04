@@ -85,7 +85,7 @@ def infer_main() -> None:
         f"SCB-data={'on' if status['scb_yaml'] else 'off'}"
     )
     if not status["l2cs_gaze"] or not status["scb_behavior"]:
-        print("Missing weights. Run: python scripts/download_datasets.py --skip-daisee")
+        print("Missing weights. Run: python scripts/download_datasets.py")
     viz_cfg = pipe.cfg.get("viz", {})
     high = float(viz_cfg.get("high", 70.0))
     low = float(viz_cfg.get("moderate_low", 40.0))

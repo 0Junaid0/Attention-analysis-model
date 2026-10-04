@@ -1,7 +1,8 @@
 """Clone SCB-dataset + L2CS-Net and download the files this pipeline uses.
 
-  SCB:  https://github.com/Whiffe/SCB-dataset.git
-  L2CS: https://github.com/Ahmednull/L2CS-Net.git
+  SCB:    https://github.com/Whiffe/SCB-dataset.git
+  L2CS:   https://github.com/Ahmednull/L2CS-Net.git
+  DAiSEE: kagglehub dataset olgaparfenova/daisee
 
 FER2013 and RAF-DB are not used.
 """
@@ -121,11 +122,44 @@ def _write_data_yaml(scb_root: Path) -> Path:
     return yaml_path
 
 
+def _daisee_present(dest: Path) -> bool:
+    if not dest.exists():
+        return False
+    if (dest / "DAiSEE" / "Labels").is_dir():
+        return True
+    for pattern in ("*.avi", "*.mp4"):
+        if any(dest.rglob(pattern)):
+            return True
+    return False
+
+
+def _download_daisee() -> None:
+    """Same entry point as SCB and L2CS: one setup script, skip if already on disk."""
+    dest = DATA / "daisee"
+    if _daisee_present(dest):
+        print(f"Already have DAiSEE at {dest}")
+        return
+    import importlib.util
+
+    script = ROOT / "scripts" / "download_daisee_kaggle.py"
+    spec = importlib.util.spec_from_file_location("download_daisee_kaggle", script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load {script}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    cache = module.download_daisee()
+    module.attach_to_project(cache, dest)
+    n_files, n_videos = module._count(cache)
+    print(f"DAiSEE files: {n_files} ({n_videos} videos)")
+    print(f"DAiSEE path:  {dest}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-scb-zip", action="store_true")
     parser.add_argument("--skip-l2cs-weights", action="store_true")
     parser.add_argument("--skip-scb-weights", action="store_true")
+    parser.add_argument("--skip-daisee", action="store_true", help="Skip the ~14GB DAiSEE download")
     args = parser.parse_args()
 
     _clone(SCB_GIT, THIRD / "SCB-dataset")
@@ -159,9 +193,13 @@ def main() -> None:
             print("Pretrained SCB weights are enough to run inference.")
             print("Copy YOLO images/labels into data/raw/scb/ if you want to retrain.")
 
+    if not args.skip_daisee:
+        _download_daisee()
+
     print("\nDone. Inference uses:")
     print("  checkpoints/l2cs_gaze360_resnet50.safetensors")
     print("  checkpoints/scb_yolo.pt")
+    print("  data/raw/daisee")
     print("Optional retrain: python scripts/train_scb_yolo.py")
     print("FER2013 / RAF-DB are not part of this setup.")
 

@@ -83,5 +83,5 @@ def resolve_daisee_root() -> Path:
         if cached.exists():
             return cached
     raise FileNotFoundError(
-        "DAiSEE not found. Run: python scripts/download_daisee_kaggle.py"
+        "DAiSEE not found. Run: python scripts/download_datasets.py"
     )

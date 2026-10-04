@@ -16,16 +16,16 @@ Gaze comes from **L2CS-Net**. Classroom actions come from **SCB-dataset**.
 ```powershell
 cd "C:\Users\USER\Desktop\Thesis mmodel"
 python -m pip install -e .
-python -m pip install ultralytics deep-sort-realtime safetensors huggingface_hub
+python -m pip install ultralytics deep-sort-realtime safetensors huggingface_hub kagglehub
 ```
 
-## Download SCB-dataset and L2CS-Net
+## Download SCB-dataset, L2CS-Net, and DAiSEE
 
 ```powershell
-python scripts/download_datasets.py --skip-daisee
+python scripts/download_datasets.py
 ```
 
-Or the lower-level script:
+Or the lower-level script, which downloads the same three:
 
 ```powershell
 python scripts/setup_scb_l2cs.py
@@ -42,6 +42,15 @@ and downloads:
 - L2CS Gaze360 weights → `checkpoints/l2cs_gaze360_resnet50.safetensors`
 - SCB pretrained YOLO (hand-raising / reading / writing) → `checkpoints/scb_yolo.pt`
 - SCB images/labels → `data/raw/scb/`
+- DAiSEE clips → `data/raw/daisee/` (Kaggle `olgaparfenova/daisee`, about 14 GB)
+
+DAiSEE needs a Kaggle login the first time:
+
+```powershell
+python -c "import kagglehub; kagglehub.login()"
+```
+
+Add `--skip-daisee` only if you want SCB and L2CS without the 14 GB clip set.
 
 After this, the classroom overlay uses SCB: **reading** and **writing** count as HIGH attention. Retraining is optional:
 
@@ -86,6 +95,7 @@ Open `runs/attention_overlay.mp4`.
 | YOLO11-Pose | Ultralytics | Frozen |
 | L2CS-Net gaze | Ahmednull/L2CS-Net Gaze360 weights | Pretrained (optional fine-tune) |
 | SCB behavior YOLO | Whiffe/SCB-dataset pretrained `scb_yolo.pt` | Optional `train_scb_yolo.py` |
+| DAiSEE | Kaggle `olgaparfenova/daisee` | Optional fusion train |
 | FER2013 / RAF-DB | — | **Not used** |
 
 SCB-dataset3 classes: hand-raising, reading, writing, using-phone, bowing-head, leaning-over-table. The Hugging Face zip currently used is the 3-class subset (hand-raising, reading, writing).

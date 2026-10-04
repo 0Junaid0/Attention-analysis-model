@@ -1,8 +1,8 @@
 """Download and attach every dataset this thesis pipeline uses.
 
-  SCB:   https://github.com/Whiffe/SCB-dataset.git  (+ HF images/weights)
-  L2CS:  https://github.com/Ahmednull/L2CS-Net.git (+ Gaze360 weights)
-  DAiSEE (optional fusion): olgaparfenova/daisee via kagglehub
+  SCB:    https://github.com/Whiffe/SCB-dataset.git  (+ HF images/weights)
+  L2CS:   https://github.com/Ahmednull/L2CS-Net.git (+ Gaze360 weights)
+  DAiSEE: olgaparfenova/daisee via kagglehub
 
 FER2013 and RAF-DB are not downloaded.
 """
@@ -32,17 +32,18 @@ def main() -> None:
     scb_args = []
     if args.skip_scb_zip:
         scb_args.append("--skip-scb-zip")
+    if args.skip_daisee:
+        scb_args.append("--skip-daisee")
     _run("setup_scb_l2cs.py", *scb_args)
-
-    if not args.skip_daisee:
-        try:
-            _run("download_daisee_kaggle.py")
-        except subprocess.CalledProcessError as exc:
-            print(f"DAiSEE download skipped/failed ({exc}). SCB+L2CS are enough for the overlay.")
 
     # Refresh YOLO data yaml with an absolute path for training.
     sys.path.insert(0, str(ROOT / "src"))
-    from attention_pipeline.utils import resolve_scb_root, resolve_scb_weights, resolve_l2cs_weights
+    from attention_pipeline.utils import (
+        resolve_daisee_root,
+        resolve_l2cs_weights,
+        resolve_scb_root,
+        resolve_scb_weights,
+    )
 
     scb_root = resolve_scb_root()
     yaml_path = scb_root / "scb.yaml"
@@ -57,6 +58,8 @@ def main() -> None:
     print(f"\nSCB yaml: {yaml_path}")
     print(f"L2CS weights: {resolve_l2cs_weights()}")
     print(f"SCB weights:  {resolve_scb_weights()}")
+    if not args.skip_daisee:
+        print(f"DAiSEE:       {resolve_daisee_root()}")
     print("\nDatasets ready. Run:")
     print('  python -m attention_pipeline.cli "video\\Classroom_video.mp4" --seconds 20')
 
