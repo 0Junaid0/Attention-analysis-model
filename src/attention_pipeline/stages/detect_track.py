@@ -41,6 +41,8 @@ class DetectorTracker:
         self.tiles = tiles
         self._next_id = 1
         self._prev: list[tuple[int, np.ndarray]] = []
+        self._instructor: tuple[float, float] | None = None
+        self._instructor_misses = 0
 
     def _lazy_load(self) -> None:
         if self._yolo is not None:
@@ -58,6 +60,10 @@ class DetectorTracker:
         """One box per visible person. The count is whoever is in this frame."""
         self._lazy_load()
         packed = self._detect_people(frame)
+        frame_h = int(frame.shape[0])
+        packed, self._instructor, self._instructor_misses = _drop_instructors(
+            packed, frame_h, self._instructor, self._instructor_misses
+        )
         if not packed:
             self._prev = []
             return []
@@ -257,6 +263,85 @@ def _add_unmatched_people(
         people.append((tight, conf, kpts))
         heads.append((hx, hy, hs))
     return people
+
+
+def _drop_instructors(
+    people: list[tuple[np.ndarray, float, np.ndarray]],
+    frame_h: int,
+    remembered: tuple[float, float] | None,
+    misses: int,
+) -> tuple[list[tuple[np.ndarray, float, np.ndarray]], tuple[float, float] | None, int]:
+    """Remove a standing instructor at the front. Seated students stay marked.
+
+    The instructor is the person whose legs are extended and whose head sits
+    clearly above the seated rows. At most two people match. A recent instructor
+    head is kept unmarked for a short time if the legs are hidden for a frame.
+    """
+    if len(people) < 4:
+        return people, remembered, misses + 1
+
+    heads = [_head_top(box, kpts) for box, _conf, kpts in people]
+    band = sorted(head[1] for head in heads)[max(0, int(0.2 * (len(heads) - 1)))]
+    margin = max(50.0, 0.05 * frame_h)
+    standing_above: list[int] = []
+    for index, ((box, _conf, kpts), head) in enumerate(zip(people, heads)):
+        if _legs_extended(kpts) and head[1] < band - margin:
+            standing_above.append(index)
+
+    # More than two matches means the pose cue is not separating an instructor.
+    if len(standing_above) > 2:
+        standing_above = []
+
+    drop: set[int] = set(standing_above)
+    if remembered is not None and len(standing_above) <= 2:
+        reach = max(80.0, 0.06 * frame_h)
+        for index, head in enumerate(heads):
+            dist = ((head[0] - remembered[0]) ** 2 + (head[1] - remembered[1]) ** 2) ** 0.5
+            if dist <= reach and head[1] < band - margin * 0.5:
+                drop.add(index)
+
+    if not drop:
+        misses += 1
+        if misses > 12:
+            remembered = None
+        return people, remembered, misses
+
+    kept = [person for index, person in enumerate(people) if index not in drop]
+    chosen = min(drop, key=lambda index: heads[index][1])
+    remembered = heads[chosen]
+    return kept, remembered, 0
+
+
+def _head_top(box: np.ndarray, kpts: np.ndarray) -> tuple[float, float]:
+    xs = [(float(box[0]) + float(box[2])) / 2.0]
+    ys = [float(box[1])]
+    for index in (0, 1, 2, 3, 4):
+        if _kp_ok(kpts, index, 0.25):
+            xs.append(float(kpts[index, 0]))
+            ys.append(float(kpts[index, 1]))
+    return sum(xs) / len(xs), min(ys)
+
+
+def _legs_extended(kpts: np.ndarray) -> bool:
+    """True when the thighs run downward, which seated desk rows do not show."""
+    if not (_kp_ok(kpts, 11, 0.4) and _kp_ok(kpts, 12, 0.4)):
+        return False
+    knee_ys = [float(kpts[index, 1]) for index in (13, 14) if _kp_ok(kpts, index, 0.45)]
+    if not knee_ys:
+        return False
+    hip = (float(kpts[11, 1]) + float(kpts[12, 1])) / 2.0
+    knee = sum(knee_ys) / len(knee_ys)
+    thigh = knee - hip
+    if thigh < 24.0:
+        return False
+    if _kp_ok(kpts, 0, 0.25):
+        torso = hip - float(kpts[0, 1])
+    elif _kp_ok(kpts, 5, 0.3) and _kp_ok(kpts, 6, 0.3):
+        shoulder = (float(kpts[5, 1]) + float(kpts[6, 1])) / 2.0
+        torso = hip - shoulder
+    else:
+        return False
+    return thigh >= 0.45 * max(torso, 8.0)
 
 
 def _kp_ok(kpts: np.ndarray, index: int, thresh: float = 0.25) -> bool:

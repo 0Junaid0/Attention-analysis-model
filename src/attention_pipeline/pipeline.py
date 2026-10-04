@@ -9,6 +9,7 @@ import numpy as np
 import torch
 
 from attention_pipeline.features import to_student_frame
+from attention_pipeline.rubric import apply_peer_cues, classify_attention
 from attention_pipeline.models.attention_fusion import AttentionFusionNet
 from attention_pipeline.models.drop_detector import AttentionDropDetector, DropConfig
 from attention_pipeline.models.l2cs_net import L2CSNet
@@ -145,17 +146,32 @@ class AttentionPipeline:
 
         per_student = []
         events = []
+        pending = []
         for track, obs in observed:
+            behavior = classify_attention(obs, lesson_yaw=self._lesson_yaw)
             score, rubric = self.scorer.push(
                 track, obs.features, timestamp, obs=obs, lesson_yaw=self._lesson_yaw
             )
             if rubric is None:
-                from attention_pipeline.stages.visualize import attention_band
+                rubric = behavior
+            if behavior.band == "LOW" and rubric.score > behavior.score:
+                rubric = behavior
+                score = behavior.score
+                if track.scores:
+                    track.scores[-1] = score
+            pending.append((track, obs, score, rubric))
 
-                band = attention_band(score)
-                cue = ""
-            else:
-                band, cue = rubric.band, rubric.cue
+        peer = apply_peer_cues(
+            [obs for _track, obs, _score, _rubric in pending],
+            [rubric for _track, _obs, _score, rubric in pending],
+            self._lesson_yaw,
+        )
+        for (track, obs, score, _old), rubric in zip(pending, peer):
+            if rubric.score < score:
+                score = rubric.score
+                if track.scores:
+                    track.scores[-1] = score
+            band, cue = rubric.band, rubric.cue
             event = self.drop.update(track, obs.features)
             rec = recommend(event, class_mean_score=_mean_score(self.tracks)) if event else None
             if event:

@@ -284,6 +284,8 @@ def scb_attention_override(
 ) -> tuple[str, float, str] | None:
     """SCB sets the band only when pose/context agrees (multi-angle safe)."""
     cues = cues or {}
+    if cues.get("sleeping") or cues.get("head_on_table") or cues.get("look_left") or cues.get("look_right"):
+        return None
     if cues.get("standing"):
         if name in {"reading", "writing", "bowing-head", "leaning-over-table"}:
             return None
@@ -317,7 +319,10 @@ def scb_attention_override(
             return "HIGH", 84.0, "reading / head to desk"
         return None
 
-    if name in SCB3_TO_LOW:
-        cue = "using phone" if name == "using-phone" else "leaning on desk"
-        return "LOW", 24.0, cue
+    if name == "using-phone":
+        return "LOW", 24.0, "using phone"
+    if name == "leaning-over-table":
+        if cues.get("head_on_table"):
+            return "LOW", 20.0, "head on table"
+        return None
     return None

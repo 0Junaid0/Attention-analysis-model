@@ -21,6 +21,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 from attention_pipeline.models.posture_mlp import PostureMLP
+from attention_pipeline.timed_checkpoint import TimedCheckpoint, resume_path_for
 from attention_pipeline.types import POSTURE_LABELS
 from attention_pipeline.utils import resolve_device
 
@@ -51,6 +52,9 @@ def main() -> None:
     p.add_argument("--epochs", type=int, default=40)
     p.add_argument("--batch", type=int, default=32)
     p.add_argument("--out", default="checkpoints/posture_scb.pt")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--checkpoint-minutes", type=float, default=30)
+    p.add_argument("--fresh", action="store_true", help="Ignore a saved resume checkpoint")
     args = p.parse_args()
     path = Path(args.csv)
     if not path.exists():
@@ -60,7 +64,10 @@ def main() -> None:
     ds = KeypointCsv(path)
     n_val = max(1, len(ds) // 5)
     n_train = len(ds) - n_val
-    train_ds, val_ds = torch.utils.data.random_split(ds, [n_train, n_val])
+    split_gen = torch.Generator().manual_seed(args.seed)
+    train_ds, val_ds = torch.utils.data.random_split(
+        ds, [n_train, n_val], generator=split_gen
+    )
     train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch)
     device = resolve_device("auto")
@@ -68,7 +75,29 @@ def main() -> None:
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
     loss_fn = nn.CrossEntropyLoss()
     best = 0.0
-    for epoch in range(1, args.epochs + 1):
+    start_epoch = 1
+    out = Path(args.out)
+    ckpt = TimedCheckpoint(resume_path_for(out), minutes=args.checkpoint_minutes)
+    saved = None if args.fresh else ckpt.load(map_location=device)
+    if saved:
+        model.load_state_dict(saved["model"])
+        opt.load_state_dict(saved["optimizer"])
+        best = float(saved.get("best", best))
+        start_epoch = int(saved["epoch"]) + (1 if saved.get("epoch_finished") else 0)
+        print(f"Resuming posture training at epoch {start_epoch} from {ckpt.path}")
+    else:
+        print(f"Posture checkpoint every {args.checkpoint_minutes:g} min -> {ckpt.path}")
+
+    def _payload(epoch: int, finished: bool) -> dict:
+        return {
+            "model": model.state_dict(),
+            "optimizer": opt.state_dict(),
+            "epoch": epoch,
+            "epoch_finished": finished,
+            "best": best,
+        }
+
+    for epoch in range(start_epoch, args.epochs + 1):
         model.train()
         for x, y in train_loader:
             x, y = x.to(device), y.to(device)
@@ -76,6 +105,7 @@ def main() -> None:
             opt.zero_grad()
             loss.backward()
             opt.step()
+            ckpt.maybe_save(lambda epoch=epoch: _payload(epoch, False))
         model.eval()
         correct = n = 0
         with torch.no_grad():
@@ -88,8 +118,9 @@ def main() -> None:
         print(f"epoch {epoch:03d}  val_acc {acc:.3f}")
         if acc >= best:
             best = acc
-            Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-            torch.save({"model": model.state_dict(), "val_acc": acc}, args.out)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            torch.save({"model": model.state_dict(), "val_acc": acc}, out)
+        ckpt.save(_payload(epoch, True), reason=f"epoch {epoch}")
 
 
 if __name__ == "__main__":

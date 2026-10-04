@@ -111,8 +111,8 @@ def _draw_legend(
     lines = [
         f"t={ts:5.1f}s   students={n}",
         f"HIGH  watching/reading/notes {counts['HIGH']}",
-        f"MOD   relaxed / glancing     {counts['MODERATE']}",
-        f"LOW   asleep / turned away   {counts['LOW']}",
+        f"MOD   glancing / listening   {counts['MODERATE']}",
+        f"LOW   away/asleep/talking    {counts['LOW']}",
     ]
     colors = [COLOR_TEXT, COLOR_HIGH, COLOR_MOD, COLOR_LOW]
     x, y = 12, 28

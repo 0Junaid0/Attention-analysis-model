@@ -152,9 +152,13 @@ def infer_main() -> None:
     writer.release()
     report_path = json_path.with_name(json_path.stem + "_report.txt")
     _write_txt_report(report_path, video, written_path, json_path, pipe.dataset_status)
+    from attention_pipeline.video_accuracy import write_video_accuracy
+
+    accuracy_path = write_video_accuracy(video, written_path, json_path)
     print(f"Wrote overlay video: {written_path.resolve()}")
     print(f"Wrote scores:        {json_path.resolve()}")
     print(f"Wrote report:        {report_path.resolve()}")
+    print(f"Wrote accuracy:      {accuracy_path.resolve()}")
 
 
 def _write_txt_report(
@@ -210,39 +214,45 @@ def _write_txt_report(
     for name, n in behaviors.most_common(8):
         lines.append(f"  {n:6d}  {name or '(none)'}")
 
-    metrics_path = Path("runs") / "smoke_metrics.json"
-    if not metrics_path.is_absolute():
-        metrics_path = Path(__file__).resolve().parents[2] / "runs" / "smoke_metrics.json"
-    if metrics_path.exists():
-        data = json.loads(metrics_path.read_text(encoding="utf-8"))
-        lines.extend(["", "=" * 72, "VALIDATION METRICS", "=" * 72, ""])
-        lines.append(f"{'Component':<28} {'Prec':>8} {'Rec':>8} {'F1':>8} {'Acc':>8}")
-        lines.append("-" * 72)
-        labels = (
-            ("SCB smoke YOLO", "scb_smoke_yolo"),
-            ("SCB official YOLO", "scb_official_yolo"),
-            ("DAiSEE fusion", "daisee_fusion"),
-            ("L2CS gaze", "l2cs_gaze"),
+    from attention_pipeline.video_accuracy import load_model_metrics, measure_rows, model_lines
+
+    metrics = measure_rows(
+        [json.loads(line) for line in jsonl.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if jsonl.exists()
+        else []
+    )
+    macro = metrics["macro"]
+    lines.extend(["", *model_lines(load_model_metrics()), ""])
+    lines.extend(
+        [
+            "=" * 72,
+            "VIDEO ACCURACY",
+            "=" * 72,
+            "",
+            "Counted from the marked students in the input video above.",
+            "A different video produces a different video accuracy.",
+            "",
+            f"{'Band':<12} {'Prec':>8} {'Rec':>8} {'F1':>8} {'Support':>8}",
+            "-" * 72,
+        ]
+    )
+    for band in ("HIGH", "MODERATE", "LOW"):
+        item = metrics["per_band"][band]
+        lines.append(
+            f"{band:<12} {item['precision']*100:7.2f}% {item['recall']*100:7.2f}% "
+            f"{item['f1']*100:7.2f}% {item['support']:8d}"
         )
-        for label, key in labels:
-            m = data.get(key) or {}
-            if "accuracy" not in m:
-                continue
-            lines.append(
-                f"{label:<28} {m['precision']*100:7.2f}% {m['recall']*100:7.2f}% "
-                f"{m['f1']*100:7.2f}% {m['accuracy']*100:7.2f}%"
-            )
-        overall = data.get("overall") or {}
-        if "accuracy" in overall:
-            lines.append("-" * 72)
-            lines.append(
-                f"{'OVERALL MODEL':<28} {overall['precision']*100:7.2f}% "
-                f"{overall['recall']*100:7.2f}% {overall['f1']*100:7.2f}% "
-                f"{overall['accuracy']*100:7.2f}%"
-            )
-            lines.append("")
-            lines.append(f"OVERALL MODEL ACCURACY: {overall['accuracy']*100:.2f}%")
-    lines.append("=" * 72)
+    lines.extend(
+        [
+            "-" * 72,
+            f"{'MACRO':<12} {macro['precision']*100:7.2f}% {macro['recall']*100:7.2f}% "
+            f"{macro['f1']*100:7.2f}%",
+            "",
+            f"VIDEO ACCURACY: {metrics['accuracy']*100:.2f}%",
+            f"Students compared: {metrics['support']}",
+            "=" * 72,
+        ]
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

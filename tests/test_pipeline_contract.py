@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 from attention_pipeline.features import heuristic_attention_score, pack_features
@@ -34,8 +36,8 @@ def test_feature_dim() -> None:
     reading = _feat(10, True)
     assert heuristic_attention_score(reading) >= 70
     asleep = pack_features(
-        head_pose=np.array([0.0, 40.0, 0.0], np.float32),
-        gaze=np.array([0.0, 40.0], np.float32),
+        head_pose=np.array([0.0, 58.0, 0.0], np.float32),
+        gaze=np.array([0.0, 58.0], np.float32),
         emotion_probs=np.array([0, 0, 0, 0, 0, 0, 1], np.float32),
         posture_probs=np.array([0, 0, 0, 0, 0, 1], np.float32),
         motion=0.01,
@@ -130,6 +132,114 @@ def test_classroom_rubric() -> None:
     assert low.band == "LOW"
 
 
+def test_looking_sleeping_and_peer_talk() -> None:
+    from attention_pipeline.features import to_student_frame
+    from attention_pipeline.rubric import apply_peer_cues, classify_attention
+
+    def frame(yaw, pitch, motion=0.1, bbox=None, keypoints=None):
+        emotion = np.zeros(7, np.float32)
+        emotion[6] = 1.0
+        posture = np.full(6, 0.1, np.float32)
+        kpts = np.zeros((17, 3), np.float32) if keypoints is None else keypoints
+        box = np.array([0, 0, 100, 180], np.float32) if bbox is None else bbox
+        return to_student_frame(
+            1,
+            0.0,
+            bbox=box,
+            keypoints=kpts,
+            head_pose=np.array([yaw, pitch, 0], np.float32),
+            gaze=np.array([yaw, pitch], np.float32),
+            emotion_probs=emotion,
+            posture_probs=posture,
+            motion=motion,
+            eye_aspect=0.3,
+            mouth_aspect=0.2,
+        )
+
+    assert classify_attention(frame(-50, 2), lesson_yaw=0.0).cue == "looking left"
+    assert classify_attention(frame(50, 2), lesson_yaw=0.0).cue == "looking right"
+    assert classify_attention(frame(0, 58, motion=0.01), lesson_yaw=0.0).cue == "sleeping"
+    assert classify_attention(frame(0, 55, motion=0.2), lesson_yaw=0.0).cue == "head on table"
+    # Facing the lesson, even if the class looks to the right, is not talking.
+    lesson = frame(30, 2, bbox=np.array([0, 40, 80, 200], np.float32))
+    neighbor = frame(30, 2, bbox=np.array([120, 40, 200, 200], np.float32))
+    kept = apply_peer_cues(
+        [lesson, neighbor],
+        [classify_attention(lesson, lesson_yaw=30.0), classify_attention(neighbor, lesson_yaw=30.0)],
+        30.0,
+    )
+    assert all(item.cue != "talking" for item in kept)
+
+    left = frame(40, 2, bbox=np.array([0, 40, 90, 210], np.float32))
+    right = frame(-40, 2, bbox=np.array([110, 40, 200, 210], np.float32))
+    talked = apply_peer_cues(
+        [left, right],
+        [classify_attention(left, lesson_yaw=0.0), classify_attention(right, lesson_yaw=0.0)],
+        0.0,
+    )
+    assert talked[0].cue == "talking"
+    assert talked[1].cue == "talking"
+
+    kpts = np.zeros((17, 3), np.float32)
+    kpts[9] = [150, 80, 1.0]  # wrist inside the neighbor box
+    kpts[0, 2] = 0.0
+    reacher = frame(40, 2, motion=0.2, bbox=np.array([0, 40, 90, 210], np.float32), keypoints=kpts)
+    quiet = frame(0, 2, bbox=np.array([110, 40, 200, 210], np.float32))
+    disturbed = apply_peer_cues(
+        [reacher, quiet],
+        [classify_attention(reacher, lesson_yaw=0.0), classify_attention(quiet, lesson_yaw=0.0)],
+        0.0,
+    )
+    assert disturbed[0].cue == "disturbing others"
+    assert disturbed[1].cue != "disturbing others"
+
+
+def test_video_accuracy_is_a_new_file() -> None:
+    from attention_pipeline.video_accuracy import measure_rows, unique_report_path, write_video_accuracy
+
+    high = {
+        "band": "HIGH",
+        "head_pose": [0.0, 10.0, 0.0],
+        "posture": [0.0, 0.9, 0.05, 0.0, 0.0, 0.05],
+    }
+    low = {
+        "band": "LOW",
+        "head_pose": [0.0, 60.0, 0.0],
+        "posture": [0.1, 0.1, 0.1, 0.1, 0.1, 0.5],
+    }
+    mismatch = {
+        "band": "HIGH",
+        "head_pose": [0.0, 70.0, 0.0],
+        "posture": [0.1, 0.1, 0.1, 0.1, 0.1, 0.5],
+    }
+    metrics = measure_rows([{"students": [high, low, mismatch]}])
+    assert metrics["support"] == 3
+    assert abs(metrics["accuracy"] - (2 / 3)) < 1e-6
+    assert metrics["per_band"]["LOW"]["support"] == 2
+
+    folder = Path("runs") / "_accuracy_test"
+    folder.mkdir(parents=True, exist_ok=True)
+    video = Path("video") / "Classroom_video.mp4"
+    first = unique_report_path(video, folder)
+    first.write_text("keep\n", encoding="utf-8")
+    second = unique_report_path(video, folder)
+    assert first != second
+    assert first.read_text(encoding="utf-8") == "keep\n"
+    scores = folder / "scores.jsonl"
+    scores.write_text(
+        '{"students": ['
+        + '{"band": "HIGH", "head_pose": [0, 10, 0], "posture": [0, 0.9, 0, 0, 0, 0.1]}'
+        + "]}\n",
+        encoding="utf-8",
+    )
+    written = write_video_accuracy(video, Path("runs/overlay.mp4"), scores, folder)
+    assert written.exists()
+    text = written.read_text(encoding="utf-8")
+    assert "MODEL ACCURACY" in text
+    assert "VIDEO ACCURACY" in text
+    assert first.read_text(encoding="utf-8") == "keep\n"
+
+
 def test_geometric_posture_keypoints() -> None:
     from attention_pipeline.stages.modalities import geometric_posture
 
@@ -195,3 +305,33 @@ def test_attention_bands_and_overlay() -> None:
     )
     assert out.shape == frame.shape
     assert out.sum() > 0
+
+
+def _person(x: float, head_y: float, thigh: float) -> tuple:
+    kpts = np.zeros((17, 3), np.float32)
+    kpts[0] = [x, head_y + 28, 1.0]
+    kpts[5] = [x - 18, head_y + 70, 1.0]
+    kpts[6] = [x + 18, head_y + 70, 1.0]
+    hip = head_y + 150
+    kpts[11] = [x - 12, hip, 1.0]
+    kpts[12] = [x + 12, hip, 1.0]
+    kpts[13] = [x - 12, hip + thigh, 1.0]
+    kpts[14] = [x + 12, hip + thigh, 1.0]
+    box = np.array([x - 36, head_y, x + 36, head_y + 130], np.float32)
+    return box, 0.8, kpts
+
+
+def test_standing_instructor_is_not_marked() -> None:
+    from attention_pipeline.stages.detect_track import _drop_instructors
+
+    students = [_person(120 + i * 90, 280, 36) for i in range(8)]
+    instructor = _person(1500, 90, 120)
+    kept, remembered, misses = _drop_instructors(students + [instructor], 1080, None, 0)
+    assert len(kept) == 8
+    assert remembered is not None
+    assert remembered[1] < 150
+    assert misses == 0
+    # A seated person with long visible legs stays, because their head is in the rows.
+    front = _person(400, 520, 90)
+    kept2, _, _ = _drop_instructors(students + [front], 1080, None, 0)
+    assert len(kept2) == 9

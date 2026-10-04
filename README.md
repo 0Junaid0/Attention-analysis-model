@@ -58,6 +58,14 @@ After this, the classroom overlay uses SCB: **reading** and **writing** count as
 python scripts/train_scb_yolo.py
 ```
 
+## Train on SCB, L2CS-Net, and DAiSEE
+
+```powershell
+python scripts/train_all.py
+```
+
+That uses every SCB image (train and val) and every labeled DAiSEE clip (train, validation, and test). L2CS-Net is fine-tuned on a face from each of those clips. A checkpoint is saved every 30 minutes. Run the same command again to continue after a power cut.
+
 ## Smoke / benchmark test (before full training)
 
 ```powershell
