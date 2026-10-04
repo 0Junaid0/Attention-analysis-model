@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "attention-pipeline"
+version = "0.1.0"
+description = "Multimodal classroom attention pipeline: detect, track, score, trigger, intervene."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "opencv-python>=4.8",
+  "torch>=2.1",
+  "torchvision>=0.16",
+  "PyYAML>=6.0",
+  "Pillow>=10.0",
+  "safetensors>=0.4",
+]
+
+[project.optional-dependencies]
+detect = ["ultralytics>=8.3", "deep-sort-realtime>=1.5"]
+kaggle = ["kagglehub>=0.3"]
+l2cs = ["safetensors>=0.4"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+attention-demo = "attention_pipeline.demo:main"
+attention-infer = "attention_pipeline.cli:infer_main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

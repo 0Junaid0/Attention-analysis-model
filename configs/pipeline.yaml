@@ -1,0 +1,70 @@
+fps: 10
+image_size: [640, 640]
+device: auto  # auto | cpu | cuda
+
+detect:
+  weights: yolo11n-pose.pt
+  person_weights: yolo11n.pt
+  conf: 0.08
+  iou: 0.45
+  imgsz: 960
+  tiles: true
+
+track:
+  max_age: 45
+  n_init: 1
+  max_iou_distance: 0.7
+
+face:
+  backend: openseeface  # openseeface | mediapipe | stub
+  min_face_px: 20
+
+# Dataset / weight locations (relative to project root).
+# FER2013 and RAF-DB are not used.
+data:
+  scb_root: data/raw/scb/SCB5-Handrise-Read-write/SCB5-Handrise-Read-write-2024-9-17
+  scb_yaml: data/raw/scb/SCB5-Handrise-Read-write/SCB5-Handrise-Read-write-2024-9-17/scb.yaml
+  daisee_root: data/raw/daisee
+  l2cs_repo: third_party/L2CS-Net
+  scb_repo: third_party/SCB-dataset
+
+models:
+  gaze_weights: checkpoints/l2cs_gaze360_resnet50.safetensors
+  posture_weights: checkpoints/posture_scb.pt
+  scb_weights: checkpoints/scb_yolo.pt
+  fusion_weights: checkpoints/fusion_daisee.pt
+
+scb:
+  conf: 0.45
+  match_iou: 0.45
+  blend: 0.50
+  # SCB-dataset3 classes: hand-raising, reading, writing,
+  # using-phone, bowing-head, leaning-over-table
+
+fusion:
+  feat_dim: 32
+  hidden: 64
+  window: 16
+  score_min: 0.0
+  score_max: 100.0
+
+drop:
+  low_threshold: 40.0
+  sustain_seconds: 3.0
+  sudden_delta: 20.0
+  sudden_seconds: 2.0
+  cooldown_seconds: 8.0
+  ema_alpha: 0.3
+
+llm:
+  enabled: false
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.2
+
+viz:
+  high: 70.0
+  moderate_low: 40.0
+  out_video: runs/attention_overlay.mp4
+  # Overlay bands come from the classroom rubric (posture / face / actions),
+  # not from these cutoffs alone. Cutoffs still label the fusion score if trained.
